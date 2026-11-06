@@ -1,0 +1,40 @@
+name: Update data
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # every Monday 07:00 UTC
+  workflow_dispatch:       # "Run workflow" button on GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build data
+        run: python3 -I scripts/build_data.py --out data/gamedata.json --sprites data/sprites
+      - name: Publish only if the stats changed
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, sys
+          new = json.load(open("data/gamedata.json"))
+          try:
+              old = json.loads(subprocess.check_output(["git", "show", "HEAD:data/gamedata.json"]))
+          except Exception:
+              old = None
+          strip = lambda d: {**d, "meta": {k: v for k, v in d["meta"].items() if k != "built"}}
+          if old is not None and strip(old) == strip(new):
+              print("No stat changes; keeping the published data.")
+              subprocess.check_call(["git", "checkout", "--", "data/gamedata.json", "data/version.json"])
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then echo "Nothing to publish"; exit 0; fi
+          git commit -m "Update data $(date -u +%F)"
+          git push
